@@ -170,7 +170,8 @@ export default {
     if (cfLocation === "JP") clientIp = '61.211.0.1';   
     else if (cfLocation === "SG") clientIp = '175.156.0.1';  
     else if (cfLocation === "HK") clientIp = '203.198.0.1';  
-    else if (cfLocation === "US") clientIp = '8.8.8.8';      
+    else if (cfLocation === "US") clientIp = '8.8.8.8';
+    else if (cfLocation === "EU") clientIp = '1.1.1.1';
 
     const cache = caches.default;
 
