@@ -9,7 +9,6 @@ const SPEED_RACE_UPSTREAMS = [
   'https://doh.opendns.com/dns-query',             // 6. OpenDNS (Cisco) 全球骨干网
   'https://doh.dns.sb/dns-query'                   // 7. DNS.SB 极速隐私海外专线
   'https://dns.nextdns.io/7933d8',        // 8. NextDNS (DIY)
-  'https://1.1.1.1/dns-query',            // 9. Cloudflare DNS(IP)
 ];
 
 const GAME_KEYWORDS = [
