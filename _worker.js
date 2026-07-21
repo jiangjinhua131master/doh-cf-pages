@@ -9,7 +9,12 @@ const SPEED_RACE_UPSTREAMS = [
   'https://doh.opendns.com/dns-query',             // 6. OpenDNS (Cisco) 全球骨干网
   'https://doh.dns.sb/dns-query',                 // 7. DNS.SB 极速隐私海外专线
   'https://dns.nextdns.io/7933d8',         // 8. NextDNS (DIY)
-  'https://1.1.1.1/dns-query'         // 9. Cloudflare DNS IP
+  'https://1.1.1.1/dns-query',         // 9. Cloudflare DNS IP
+  'https://8.8.4.4/dns-query',         // 10. GoogleDNS IP
+  'https://223.5.5.5/dns-query',       // 11. 阿里云公共 DNS IP
+  'https://1.12.12.12/dns-query',      // 12. 腾讯云公共 DNS IP
+  'https://ru-mow.doh.sb/dns-query',   // 13. DNS.SB 俄罗斯节点公共 DNS
+  'https://jp-nrt.doh.sb/dns-query'    // 14. DNS.SB 日本东京节点公共 DNS
 ];
 
 const GAME_KEYWORDS = [
