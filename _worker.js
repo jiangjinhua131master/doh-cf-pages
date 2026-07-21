@@ -2,19 +2,16 @@
 
 const SPEED_RACE_UPSTREAMS = [
   'https://dns.google/dns-query',                 // 1. 谷歌全球万兆任播
-  'https://cloudflare-dns.com/dns-query', // 2. Cloudflare 纯净海外防刷专线
-  'https://dns.alidns.com/dns-query',              // 3. 阿里云公共 DNS
-  'https://doh.pub/dns-query',                     // 4. 腾讯云公共 DNS
-  'https://common.dot.dns.yandex.net/dns-query',    // 5. Yandex 俄服/战雷极速版
-  'https://doh.opendns.com/dns-query',             // 6. OpenDNS (Cisco) 全球骨干网
+  'https://cloudflare-dns.com/dns-query',         // 2. Cloudflare 纯净海外防刷专线
+  'https://dns.alidns.com/dns-query',             // 3. 阿里云公共 DNS
+  'https://doh.pub/dns-query',                    // 4. 腾讯云公共 DNS
+  'https://common.dot.dns.yandex.net/dns-query',  // 5. Yandex 俄服/战雷极速版
+  'https://doh.opendns.com/dns-query',            // 6. OpenDNS (Cisco) 全球骨干网
   'https://doh.dns.sb/dns-query',                 // 7. DNS.SB 极速隐私海外专线
-  'https://dns.nextdns.io/7933d8',         // 8. NextDNS (DIY)
-  'https://1.1.1.1/dns-query',         // 9. Cloudflare DNS IP
-  'https://8.8.4.4/dns-query',         // 10. GoogleDNS IP
-  'https://223.5.5.5/dns-query',       // 11. 阿里云公共 DNS IP
-  'https://1.12.12.12/dns-query',      // 12. 腾讯云公共 DNS IP
-  'https://ru-mow.doh.sb/dns-query',   // 13. DNS.SB 俄罗斯节点公共 DNS
-  'https://jp-nrt.doh.sb/dns-query'    // 14. DNS.SB 日本东京节点公共 DNS
+  'https://1.1.1.1/dns-query',         // 8. Cloudflare DNS IP
+  'https://ru-mow.doh.sb/dns-query',   // 9. DNS.SB 俄罗斯节点公共 DNS
+  'https://jp-nrt.doh.sb/dns-query',   // 10. DNS.SB 日本东京节点公共 DNS
+  'https://dns.quad9.net/dns-query'    // 11. Quad9 隐私加强公共 DNS
 ];
 
 const GAME_KEYWORDS = [
