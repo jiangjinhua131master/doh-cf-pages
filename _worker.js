@@ -2,11 +2,12 @@
 
 const SPEED_RACE_UPSTREAMS = [
   'https://dns.google/dns-query',                 // 1. 谷歌全球万兆任播
-  'https://dns.alidns.com/dns-query',             // 2. 阿里云公共 DNS
-  'https://doh.pub/dns-query',                    // 3. 腾讯云公共 DNS
-  'https://doh.opendns.com/dns-query',            // 4. OpenDNS (Cisco) 全球骨干网
-  'https://doh.dns.sb/dns-query',                 // 5. DNS.SB 极速隐私海外专线
-  'https://dns.quad9.net/dns-query'               // 6. Quad9 隐私加强公共 DNS
+  'https://8.8.4.4/dns-query',                    // 2. Google DNS IP
+  'https://dns.alidns.com/dns-query',             // 3. 阿里云公共 DNS
+  'https://doh.pub/dns-query',                    // 4. 腾讯云公共 DNS
+  'https://doh.opendns.com/dns-query',            // 5. OpenDNS (Cisco) 全球骨干网
+  'https://doh.dns.sb/dns-query',                 // 6. DNS.SB 极速隐私海外专线
+  'https://dns.quad9.net/dns-query'               // 7. Quad9 隐私加强公共 DNS
 ];
 
 const GAME_KEYWORDS = [
