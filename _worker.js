@@ -113,7 +113,7 @@ export default {
           <div class="container">
               <div style="font-size:42px;">🚀</div>
               <h1>专用 DoH DNS 服务</h1>
-              <div class="status-tag"><span class="dot"></span>七星 Anycast 弹性集群已就绪</div>
+              <div class="status-tag"><span class="dot"></span>六星 Anycast 弹性集群已就绪</div>
               
               <div class="info-box">
                   <div class="info-item"><span style="color:#8b949e">DoH 地址:</span><span class="value" style="font-weight:bold;color:#58a6ff;">${url.origin}/dns-query</span></div>
