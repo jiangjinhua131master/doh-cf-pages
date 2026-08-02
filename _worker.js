@@ -2,7 +2,7 @@
 
 const SPEED_RACE_UPSTREAMS = [
   'https://dns.google/dns-query',                 // 1. 谷歌全球万兆任播
-  'https://dns.hinet.net/dns-query',              // 2. Hinet DNS IP (Beta)
+  'https://8.8.4.4/dns-query',                    // 2. Google DNS IP
   'https://dns.alidns.com/dns-query',             // 3. 阿里云公共 DNS
   'https://doh.pub/dns-query',                    // 4. 腾讯云公共 DNS
   'https://doh.opendns.com/dns-query',            // 5. OpenDNS (Cisco) 全球骨干网
