@@ -2,22 +2,17 @@
 
 const SPEED_RACE_UPSTREAMS = [
   'https://dns.google/dns-query',                 // 1. 谷歌全球万兆任播
-  'https://cloudflare-dns.com/dns-query',         // 2. Cloudflare 纯净海外防刷专线
-  'https://dns.alidns.com/dns-query',             // 3. 阿里云公共 DNS
-  'https://doh.pub/dns-query',                    // 4. 腾讯云公共 DNS
-  'https://common.dot.dns.yandex.net/dns-query',  // 5. Yandex 俄服/战雷极速版
-  'https://doh.opendns.com/dns-query',            // 6. OpenDNS (Cisco) 全球骨干网
-  'https://doh.dns.sb/dns-query',                 // 7. DNS.SB 极速隐私海外专线
-  'https://1.1.1.1/dns-query',         // 8. Cloudflare DNS IP
-  'https://ru-mow.doh.sb/dns-query',   // 9. DNS.SB 俄罗斯节点公共 DNS
-  'https://jp-nrt.doh.sb/dns-query',   // 10. DNS.SB 日本东京节点公共 DNS
-  'https://dns.quad9.net/dns-query'    // 11. Quad9 隐私加强公共 DNS
+  'https://dns.alidns.com/dns-query',             // 2. 阿里云公共 DNS
+  'https://doh.pub/dns-query',                    // 3. 腾讯云公共 DNS
+  'https://doh.opendns.com/dns-query',            // 4. OpenDNS (Cisco) 全球骨干网
+  'https://doh.dns.sb/dns-query',                 // 5. DNS.SB 极速隐私海外专线
+  'https://dns.quad9.net/dns-query'               // 6. Quad9 隐私加强公共 DNS
 ];
 
 const GAME_KEYWORDS = [
   'game', 'steam', 'epic', 'pubg', 'apex', 'riot', 'ea', 'sony', 'playstation', 'xbox', 'nintendo', 
   'warthunder', 'gaijin', 'netgames', 'wargaming', 'wotblitz', 'tankcompany', 'battle', 'pjsekai', 'sega',
-  'youtube', 'googlevideo', 'ytimg', 'netflix', 'nflxvideo', 'yandex', 'opendns', 'dnssb'
+  'youtube', 'googlevideo', 'ytimg', 'netflix', 'nflxvideo', 'opendns', 'dnssb', 'garena', 'lol'
 ];
 
 const RACE_TIMEOUT_MS = 1500;
