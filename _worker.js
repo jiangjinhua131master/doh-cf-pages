@@ -5,7 +5,7 @@ const SPEED_RACE_UPSTREAMS = [
   'https://cloudflare-dns.com/dns-query',         // 2. Cloudflare DNS
   'https://doh.opendns.com/dns-query',            // 3. OpenDNS (Cisco)
   'https://doh.dns.sb/dns-query',                 // 4. DNS.SB 极速专线
-  'https://dns11.quad9.net/dns-query'             // 5. Quad9 隐私加强
+  'https://dns.quad9.net/dns-query'               // 5. Quad9 隐私加强
 ];
 
 const ULTIMATE_FALLBACK_UPSTREAM = 'https://dns.google/dns-query';
