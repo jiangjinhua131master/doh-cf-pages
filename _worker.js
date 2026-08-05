@@ -2,12 +2,10 @@
 
 const SPEED_RACE_UPSTREAMS = [
   'https://dns.google/dns-query',                 // 1. 谷歌全球 Anycast
-  'https://1.1.1.2/dns-query',                    // 2. Cloudflare DNS IP
-  'https://dns.alidns.com/dns-query',             // 3. 阿里云公共 DNS
-  'https://doh.pub/dns-query',                    // 4. 腾讯云公共 DNS
-  'https://doh.opendns.com/dns-query',            // 5. OpenDNS (Cisco)
-  'https://doh.dns.sb/dns-query',                 // 6. DNS.SB 极速专线
-  'https://dns11.quad9.net/dns-query'             // 7. Quad9 隐私加强
+  'https://cloudflare-dns.com/dns-query',         // 2. Cloudflare DNS
+  'https://doh.opendns.com/dns-query',            // 3. OpenDNS (Cisco)
+  'https://doh.dns.sb/dns-query',                 // 4. DNS.SB 极速专线
+  'https://dns11.quad9.net/dns-query'             // 5. Quad9 隐私加强
 ];
 
 const ULTIMATE_FALLBACK_UPSTREAM = 'https://dns.google/dns-query';
@@ -15,7 +13,7 @@ const ULTIMATE_FALLBACK_UPSTREAM = 'https://dns.google/dns-query';
 const GAME_KEYWORDS = [
   'game', 'steam', 'epic', 'pubg', 'apex', 'riot', 'ea', 'sony', 'playstation', 'xbox', 'nintendo', 
   'warthunder', 'gaijin', 'netgames', 'wargaming', 'wotblitz', 'tankcompany', 'battle', 'pjsekai', 'sega',
-  'youtube', 'googlevideo', 'ytimg', 'netflix', 'nflxvideo', 'opendns', 'dnssb', 'garena', 'lol'
+  'youtube', 'googlevideo', 'ytimg', 'netflix', 'nflxvideo', 'opendns', 'dnssb', 'garena', 'lol', 'dns.google'
 ];
 
 const RACE_TIMEOUT_MS = 1800;
