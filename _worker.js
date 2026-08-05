@@ -13,7 +13,7 @@ const ULTIMATE_FALLBACK_UPSTREAM = 'https://dns.google/dns-query';
 const GAME_KEYWORDS = [
   'game', 'steam', 'epic', 'pubg', 'apex', 'riot', 'ea', 'sony', 'playstation', 'xbox', 'nintendo', 
   'warthunder', 'gaijin', 'netgames', 'wargaming', 'wotblitz', 'tankcompany', 'battle', 'pjsekai', 'sega',
-  'youtube', 'googlevideo', 'ytimg', 'netflix', 'nflxvideo', 'opendns', 'dns.sb', 'garena', 'lol', 'dns.google', 'bilibili'
+  'youtube', 'googlevideo', 'ytimg', 'netflix', 'nflxvideo', 'opendns', 'garena', 'lol', 'dns.google', 'bilibili'
 ];
 
 const RACE_TIMEOUT_MS = 1800;
