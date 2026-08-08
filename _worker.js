@@ -1,8 +1,10 @@
-// ======= 【Gamer DoH Hub - 零报错终极完全体】 =======
+// ======= 【Gamer DoH Hub - 零报错终极完全体 (HTTP/3 优化版)】 =======
 
+// 提示：Cloudflare Workers 的 fetch API 必须使用 https:// 前缀。
+// Cloudflare 边缘节点会自动与这些上游建立 HTTP/3 (QUIC) 链接，切勿改为 h3://
 const SPEED_RACE_UPSTREAMS = [
-  'https://dns.google/dns-query',                 // 1. 谷歌全球 Anycast
-  'https://cloudflare-dns.com/dns-query',         // 2. Cloudflare DNS
+  'https://dns.google/dns-query',                 // 1. 谷歌全球 Anycast (原生支持 H3)
+  'https://cloudflare-dns.com/dns-query',         // 2. Cloudflare DNS (原生支持 H3)
   'https://doh.opendns.com/dns-query'             // 3. OpenDNS (Cisco)
 ];
 
@@ -177,11 +179,15 @@ export default {
         upstreamHeaders.set('Content-Type', 'application/dns-message');
       }
 
+      // 优化网络请求设置：让 Cloudflare 边缘节点自动复用 HTTP/2 和 HTTP/3 高速长连接
       const fetchInit = {
         method: isGet ? 'GET' : 'POST',
         headers: upstreamHeaders,
         signal: controller.signal,
-        cf: { cacheTtl: 5, cacheEverything: true }
+        cf: { 
+          cacheTtl: 5, 
+          cacheEverything: true
+        }
       };
 
       if (!isGet && dnsBuffer) {
