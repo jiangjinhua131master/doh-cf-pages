@@ -13,7 +13,7 @@ const ULTIMATE_FALLBACK_UPSTREAM = 'https://dns.google/dns-query';
 const GAME_KEYWORDS = [
   'game', 'steam', 'epic', 'pubg', 'apex', 'riot', 'ea', 'sony', 'playstation', 'xbox', 'nintendo',
   'warthunder', 'gaijin', 'netgames', 'wargaming', 'wotblitz', 'tankcompany', 'battle', 'pjsekai', 'sega',
-  'youtube', 'googlevideo', 'ytimg', 'netflix', 'nflxvideo', 'garena', 'lol', 'bilibili', 'dnsgoogle', 'opendns', 'dnssb'
+  'youtube', 'googlevideo', 'ytimg', 'netflix', 'nflxvideo', 'garena', 'lol', 'bilibili'
 ];
 
 const RACE_TIMEOUT_MS = 1800;
@@ -145,6 +145,7 @@ export default {
     else if (cfLocation === "SG") clientIp = '175.156.0.1';  
     else if (cfLocation === "HK") clientIp = '203.198.0.1';  
     else if (cfLocation === "US") clientIp = '8.8.8.8';
+    else if (cfLocation === "EU") clientIp = '1.1.1.1';
 
     const cache = caches.default;
 
