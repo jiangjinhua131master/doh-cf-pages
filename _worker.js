@@ -3,7 +3,7 @@
 const SPEED_RACE_UPSTREAMS = [
   'https://dns.google/dns-query',                 // 1. 谷歌全球 Anycast
   'https://cloudflare-dns.com/dns-query',         // 2. Cloudflare DNS
-  'https://doh.opendns.com/dns-query',            // 3. OpenDNS (Cisco)
+  'https://doh.opendns.com/dns-query'             // 3. OpenDNS (Cisco)
 ];
 
 const ULTIMATE_FALLBACK_UPSTREAM = 'https://dns.google/dns-query';
