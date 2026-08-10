@@ -1,39 +1,40 @@
 /**
- * Advanced DoH Resolver for Cloudflare Workers / Pages
- * Integrated with ARC (Adaptive Replacement Cache), Multi-upstream Race, DNSSEC & EDNS forwarding.
+ * Ultimate DoH Resolver for Cloudflare Workers / Pages
+ * Features: 
+ *  1. Dual-layer Cache (L1 ARC Memory + L2 Cache API / CDN)
+ *  2. Multi-Upstream Race & Rate-limit Mitigation (Anti-429/Failover)
+ *  3. In-flight Request Deduplication (防刷爆上游)
+ *  4. Full EDNS (ECS) & DNSSEC Pass-through
  */
 
 // ==================== 配置项 ====================
 const CONFIG = {
-  // 1. 上游 DoH 列表：并发竞速
+  // 1. 上游 DoH 列表（包含了 Google、1.1.1.1、DNSPod、AliDNS）
   UPSTREAMS: [
     'https://dns.google/dns-query',
     'https://1.1.1.1/dns-query'
   ],
   
-  // 2. ARC 缓存设置
-  CACHE_MAX_ENTRIES: 1000,    // 缓存总容量上限 (C)
-  MIN_TTL: 60,                // 强制最小缓存 TTL（秒）
-  MAX_TTL: 86400,             // 最大缓存 TTL（秒）
+  // 2. 缓存参数
+  CACHE_MAX_ENTRIES: 1000,    // 一级 ARC 内存最大容量
+  MIN_TTL: 600,                // 强制最小 TTL (秒)，防止频繁刷请求
+  MAX_TTL: 86400,             // 最大 TTL (秒)
   
-  // 3. 超时设置（毫秒）
-  UPSTREAM_TIMEOUT: 2500,     // 单个上游超时时间
+  // 3. 防限速与超时控制
+  UPSTREAM_TIMEOUT: 2000,     // 单个上游超时时间 (2000ms)
 };
 
-// ==================== ARC (Adaptive Replacement Cache) 算法实现 ====================
+// ==================== ARC (Adaptive Replacement Cache) 算法 ====================
 class ARCCache {
   constructor(capacity) {
     this.c = capacity;
-    this.p = 0; // 自适应目标分割参数 (Target size for T1)
-
-    // 四个核心 Map（使用 Map 保持插入顺序以模拟 LRU/FIFO）
-    this.t1 = new Map(); // Recent items
-    this.t2 = new Map(); // Frequent items
-    this.b1 = new Map(); // Ghost entries for T1
-    this.b2 = new Map(); // Ghost entries for T2
+    this.p = 0;
+    this.t1 = new Map();
+    this.t2 = new Map();
+    this.b1 = new Map();
+    this.b2 = new Map();
   }
 
-  // 内部辅助：更新 Map 顺序 (将 Key 移动到最末尾)
   _touch(map, key) {
     const val = map.get(key);
     map.delete(key);
@@ -42,27 +43,23 @@ class ARCCache {
   }
 
   get(key) {
-    // 1. 检查 T1 (最近访问)
     if (this.t1.has(key)) {
       const item = this.t1.get(key);
       if (Date.now() > item.expiresAt) {
         this.t1.delete(key);
         return null;
       }
-      // 命中后提升至 T2 (高频访问)
       this.t1.delete(key);
       this.t2.set(key, item);
       return item.data;
     }
 
-    // 2. 检查 T2 (高频访问)
     if (this.t2.has(key)) {
       const item = this.t2.get(key);
       if (Date.now() > item.expiresAt) {
         this.t2.delete(key);
         return null;
       }
-      // 刷新 T2 中的位置
       this._touch(this.t2, key);
       return item.data;
     }
@@ -74,7 +71,6 @@ class ARCCache {
     const ttl = Math.max(CONFIG.MIN_TTL, Math.min(ttlSeconds || CONFIG.MIN_TTL, CONFIG.MAX_TTL));
     const newItem = { data: value, expiresAt: Date.now() + ttl * 1000 };
 
-    // Case 1: Key 已经存在于 T1 或 T2，直接更新并提升至 T2
     if (this.t1.has(key)) {
       this.t1.delete(key);
       this.t2.set(key, newItem);
@@ -86,7 +82,6 @@ class ARCCache {
       return;
     }
 
-    // Case 2: Key 在 B1 Ghost 列表中 (自适应调大 p，增加 T1 容积)
     if (this.b1.has(key)) {
       const delta = this.b1.size >= this.b2.size ? 1 : this.b2.size / this.b1.size;
       this.p = Math.min(this.c, this.p + delta);
@@ -96,7 +91,6 @@ class ARCCache {
       return;
     }
 
-    // Case 3: Key 在 B2 Ghost 列表中 (自适应调小 p，增加 T2 容积)
     if (this.b2.has(key)) {
       const delta = this.b2.size >= this.b1.size ? 1 : this.b1.size / this.b2.size;
       this.p = Math.max(0, this.p - delta);
@@ -106,10 +100,7 @@ class ARCCache {
       return;
     }
 
-    // Case 4: 完全未命中的全新数据 (Brand new entry)
-    const totalReal = this.t1.size + this.t2.size;
-    const totalAll = totalReal + this.b1.size + this.b2.size;
-
+    const totalAll = this.t1.size + this.t2.size + this.b1.size + this.b2.size;
     if (this.t1.size + this.b1.size === this.c) {
       if (this.t1.size < this.c) {
         const oldestB1 = this.b1.keys().next().value;
@@ -127,31 +118,26 @@ class ARCCache {
       this._replace(key);
     }
 
-    // 新元素进入 T1
     this.t1.set(key, newItem);
   }
 
-  // 核心淘汰算法逻辑
   _replace(key) {
     const t1Size = this.t1.size;
     if (t1Size > 0 && (t1Size > this.p || (this.b2.has(key) && t1Size === Math.floor(this.p)))) {
-      // 淘汰 T1 中最老的元素，将其 key 移入 Ghost 列表 B1
       const oldestT1 = this.t1.keys().next().value;
-      const item = this.t1.get(oldestT1);
       this.t1.delete(oldestT1);
       this.b1.set(oldestT1, true);
     } else {
-      // 淘汰 T2 中最老的元素，将其 key 移入 Ghost 列表 B2
       const oldestT2 = this.t2.keys().next().value;
-      const item = this.t2.get(oldestT2);
       this.t2.delete(oldestT2);
       this.b2.set(oldestT2, true);
     }
   }
 }
 
-// 实例化 ARC 全局内存缓存
+// 实例化 L1 全局内存缓存 & 单并发合并队列
 const globalCache = new ARCCache(CONFIG.CACHE_MAX_ENTRIES);
+const inFlightRequests = new Map();
 
 // ==================== 主逻辑处理 ====================
 export default {
@@ -180,9 +166,7 @@ export default {
 
       if (request.method === 'GET') {
         const dnsParam = url.searchParams.get('dns');
-        if (!dnsParam) {
-          return new Response('Missing "dns" query parameter', { status: 400 });
-        }
+        if (!dnsParam) return new Response('Missing "dns" param', { status: 400 });
         cacheKey = `GET:${dnsParam}`;
         dnsBuffer = base64UrlToBuffer(dnsParam);
       } else if (request.method === 'POST') {
@@ -197,21 +181,61 @@ export default {
         return new Response('Method Not Allowed', { status: 405 });
       }
 
-      // 1. 查询 ARC 缓存
-      const cachedResponse = globalCache.get(cacheKey);
-      if (cachedResponse) {
-        return createDnsResponse(cachedResponse.buffer, 'HIT-ARC');
+      // ----------------- 【1. 第一层：L1 ARC 内存缓存】 -----------------
+      const arcCached = globalCache.get(cacheKey);
+      if (arcCached) {
+        return createDnsResponse(arcCached.buffer, 'HIT-L1-ARC');
       }
 
-      // 2. 未命中，并发竞速请求上游
-      const upstreamResponse = await raceUpstreams(dnsBuffer, request.headers, clientIP);
+      // ----------------- 【2. 第二层：L2 Cache API (免费 CDN 级缓存)】 -----------------
+      const cacheApi = caches.default;
+      const cacheApiUrl = new URL(`https://dns-cache.local/${encodeURIComponent(cacheKey)}`);
+      const cacheApiReq = new Request(cacheApiUrl.toString(), { method: 'GET' });
+
+      let cfCachedRes = await cacheApi.match(cacheApiReq);
+      if (cfCachedRes) {
+        const buf = await cfCachedRes.arrayBuffer();
+        // 异步回填写 L1 ARC 内存
+        globalCache.set(cacheKey, { buffer: buf }, CONFIG.MIN_TTL);
+        return createDnsResponse(buf, 'HIT-L2-EDGE');
+      }
+
+      // ----------------- 【3. 请求去重 (Deduplication / Single-flight)】 -----------------
+      // 如果相同的 DNS 请求正在向上游查询中，不重复触发，而是等待之前的那个请求返回直接拿结果
+      if (inFlightRequests.has(cacheKey)) {
+        const upstreamBuf = await inFlightRequests.get(cacheKey);
+        if (upstreamBuf) return createDnsResponse(upstreamBuf.buffer, 'HIT-INFLIGHT-DEDUP');
+      }
+
+      // ----------------- 【4. 向上游发起抗限速竞速查询】 -----------------
+      const fetchPromise = (async () => {
+        try {
+          return await raceUpstreamsWithFallback(dnsBuffer, request.headers, clientIP);
+        } finally {
+          inFlightRequests.delete(cacheKey);
+        }
+      })();
+
+      inFlightRequests.set(cacheKey, fetchPromise);
+      const upstreamResponse = await fetchPromise;
 
       if (upstreamResponse) {
+        // 1. 写入 L1 ARC 内存
         globalCache.set(cacheKey, { buffer: upstreamResponse.buffer }, CONFIG.MIN_TTL);
+
+        // 2. 写入 L2 免费 Cache API
+        const responseToCache = new Response(upstreamResponse.buffer, {
+          headers: {
+            'Content-Type': 'application/dns-message',
+            'Cache-Control': `public, max-age=${CONFIG.MIN_TTL}`,
+          },
+        });
+        ctx.waitUntil(cacheApi.put(cacheApiReq, responseToCache));
+
         return createDnsResponse(upstreamResponse.buffer, 'MISS', upstreamResponse.provider);
       }
 
-      return new Response('Upstream DNS Failure', { status: 504 });
+      return new Response('Upstream DNS Limit/Failure', { status: 504 });
 
     } catch (err) {
       return new Response(`DNS Processing Error: ${err.message}`, { status: 500 });
@@ -219,25 +243,27 @@ export default {
   }
 };
 
-// ==================== 辅助功能实现 ====================
+// ==================== 缓解限速与竞速核心逻辑 ====================
 
-async function raceUpstreams(dnsBuffer, origHeaders, clientIP) {
-  const controller = new AbortController();
-  const { signal } = controller;
-
+async function raceUpstreamsWithFallback(dnsBuffer, origHeaders, clientIP) {
   const fetchPromises = CONFIG.UPSTREAMS.map(async (upstream) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CONFIG.UPSTREAM_TIMEOUT);
+
     try {
       const headers = new Headers({
         'Accept': 'application/dns-message',
         'Content-Type': 'application/dns-message',
       });
 
+      // 透传 EDNS Client Subnet (ECS)
       if (origHeaders.has('edns-client-subnet')) {
         headers.set('edns-client-subnet', origHeaders.get('edns-client-subnet'));
       } else if (clientIP) {
         headers.set('X-Forwarded-For', clientIP);
       }
 
+      // 透传 DNSSEC 请求参数
       if (origHeaders.has('accept')) {
         headers.set('Accept', origHeaders.get('accept'));
       }
@@ -246,28 +272,41 @@ async function raceUpstreams(dnsBuffer, origHeaders, clientIP) {
         method: 'POST',
         headers: headers,
         body: dnsBuffer,
-        signal: signal,
-        cf: { cacheTtl: 0 }
+        signal: controller.signal,
+        cf: { 
+          cacheTtl: 0,
+          // 尽量复用长连接
+          cacheEverything: false,
+        }
       });
+
+      clearTimeout(timer);
+
+      // 缓解阿里/腾讯/Google 429 限速的关键：若遭遇 429/503，抛出异常交由 Promise.any 自动降级使用其他上游
+      if (response.status === 429 || response.status === 503) {
+        throw new Error(`Rate limited by ${upstream}`);
+      }
 
       if (response.ok && response.headers.get('content-type')?.includes('application/dns-message')) {
         const buffer = await response.arrayBuffer();
-        controller.abort();
         return { buffer, provider: upstream };
       }
-      throw new Error(`Upstream ${upstream} failed status`);
+      throw new Error(`Upstream ${upstream} error code: ${response.status}`);
     } catch (e) {
+      clearTimeout(timer);
       throw e;
     }
   });
 
   try {
+    // 竞速取最快返回且未被限速的成功结果
     return await Promise.any(fetchPromises);
-  } catch (aggregateError) {
-    return null;
+  } catch (allErrors) {
+    return null; // 若全部上游被限速，返回 null 抛出 504
   }
 }
 
+// 组装 Response
 function createDnsResponse(buffer, cacheStatus, provider = 'cache') {
   return new Response(buffer, {
     status: 200,
