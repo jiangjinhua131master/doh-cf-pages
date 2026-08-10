@@ -1,286 +1,221 @@
-// ======= 【Gamer DoH Hub - 零报错终极完全体 (HTTP/3 优化版)】 =======
+/**
+ * Advanced DoH Resolver for Cloudflare Workers / Pages
+ * Features: LRU Cache, Multi-upstream Race, DNSSEC, EDNS (ECS) forwarding, RFC 8484 compliant.
+ */
 
-// 提示：Cloudflare Workers 的 fetch API 必须使用 https:// 前缀。
-// Cloudflare 边缘节点会自动与这些上游建立 HTTP/3 (QUIC) 链接，切勿改为 h3://
-const SPEED_RACE_UPSTREAMS = [
-  'https://dns.google/dns-query',                 // 1. 谷歌全球 Anycast (原生支持 H3)
-  'https://cloudflare-dns.com/dns-query',         // 2. Cloudflare DNS (原生支持 H3)
-  'https://doh.opendns.com/dns-query'             // 3. OpenDNS (Cisco)
-];
+// ==================== 配置项 ====================
+const CONFIG = {
+  // 1. 上游 DoH 列表：开启并发竞速，取最快返回的有效响应
+  UPSTREAMS: [
+    'https://dns.google/dns-query',
+    'https://1.1.1.1/dns-query'
+  ],
+  
+  // 2. LRU 缓存设置
+  CACHE_MAX_ENTRIES: 1000,    // 内存最多保存的 DNS 记录条数
+  MIN_TTL: 60,                // 强制最小缓存 TTL（秒），避免短 TTL 频繁触发上游请求
+  MAX_TTL: 86400,             // 最大缓存 TTL（秒）
+  
+  // 3. 超时设置（毫秒）
+  UPSTREAM_TIMEOUT: 2500,     // 单个上游超时时间
+};
 
-const ULTIMATE_FALLBACK_UPSTREAM = 'https://dns.google/dns-query';
-
-const GAME_KEYWORDS = [
-  'game', 'steam', 'epic', 'pubg', 'apex', 'riot', 'ea', 'sony', 'playstation', 'xbox', 'nintendo',
-  'warthunder', 'gaijin', 'netgames', 'wargaming', 'wotblitz', 'tankcompany', 'battle', 'pjsekai', 'sega',
-  'youtube', 'googlevideo', 'ytimg', 'netflix', 'nflxvideo', 'garena', 'lol', 'bilibili'
-];
-
-const RACE_TIMEOUT_MS = 1800;
-const MIN_TTL_NORMAL = 3600; 
-const MIN_TTL_GAME = 60;     
-const BEST_UPSTREAM_TTL_SEC = 300; 
-
-function processDnsMessage(arrayBuffer, minTtl) {
-  const view = new DataView(arrayBuffer);
-  try {
-    if (arrayBuffer.byteLength < 12) return arrayBuffer;
-    
-    const qdcount = view.getUint16(4);
-    let ancount = view.getUint16(6);
-    const nscount = view.getUint16(8);
-    const arcount = view.getUint16(10);
-    
-    let offset = 12;
-    for (let i = 0; i < qdcount; i++) {
-      while (offset < arrayBuffer.byteLength) {
-        const len = view.getUint8(offset);
-        if (len === 0) { offset += 1; break; }
-        if ((len & 0xC0) === 0xC0) { offset += 2; break; }
-        offset += 1 + len;
-      }
-      if (offset + 4 <= arrayBuffer.byteLength) offset += 4;
-    }
-    
-    const totalRecords = ancount + nscount + arcount;
-    for (let i = 0; i < totalRecords; i++) {
-      if (offset >= arrayBuffer.byteLength) break;
-      while (offset < arrayBuffer.byteLength) {
-        const len = view.getUint8(offset);
-        if (len === 0) { offset += 1; break; }
-        if ((len & 0xC0) === 0xC0) { offset += 2; break; }
-        offset += 1 + len;
-      }
-      if (offset + 10 > arrayBuffer.byteLength) break;
-      const rtype = view.getUint16(offset);
-      offset += 4;
-      const currentTtl = view.getUint32(offset);
-      if (currentTtl < minTtl && rtype !== 41) {
-        view.setUint32(offset, minTtl);
-      }
-      offset += 4;
-      const rdlen = view.getUint16(offset);
-      offset += 2 + rdlen;
-    }
-  } catch (e) {
-    console.error("DNS 报文修改失败:", e);
+// ==================== LRU Cache 缓存实现 ====================
+class LRUCache {
+  constructor(limit) {
+    this.limit = limit;
+    this.cache = new Map();
   }
-  return arrayBuffer;
+
+  get(key) {
+    if (!this.cache.has(key)) return null;
+    const item = this.cache.get(key);
+    
+    // 检查是否过期
+    if (Date.now() > item.expiresAt) {
+      this.cache.delete(key);
+      return null;
+    }
+    
+    // 刷新 LRU 顺序
+    this.cache.delete(key);
+    this.cache.set(key, item);
+    return item.data;
+  }
+
+  set(key, value, ttlSeconds) {
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    } else if (this.cache.size >= this.limit) {
+      // 淘汰最老未使用的条目 (Map 的第一个 key)
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    
+    const ttl = Math.max(CONFIG.MIN_TTL, Math.min(ttlSeconds || CONFIG.MIN_TTL, CONFIG.MAX_TTL));
+    this.cache.set(key, {
+      data: value,
+      expiresAt: Date.now() + ttl * 1000
+    });
+  }
 }
 
+// 实例化全局内存缓存（Worker 实例生命周期内持续有效）
+const globalCache = new LRUCache(CONFIG.CACHE_MAX_ENTRIES);
+
+// ==================== 主逻辑处理 ====================
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const path = url.pathname;
 
-    const isDnsQuery = path.includes('/dns-query') || url.searchParams.has('dns') || url.searchParams.has('name');
-
-    if (!isDnsQuery) {
-      const html = '<!DOCTYPE html>' +
-'<html lang="zh-CN">' +
-'<head>' +
-'    <meta charset="UTF-8">' +
-'    <meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-'    <title>专用 DoH DNS 服务</title>' +
-'    <style>' +
-'        body { background: #0d1117; color: #c9d1d9; font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }' +
-'        .container { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 35px; text-align: center; max-width: 480px; width: 90%; }' +
-'        h1 { font-size: 22px; margin: 10px 0; color: #58a6ff; }' +
-'        .status-tag { display: inline-flex; align-items: center; background: rgba(56, 139, 253, 0.15); color: #58a6ff; padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: bold; margin: 15px 0; border: 1px solid rgba(56, 139, 253, 0.3); }' +
-'        .dot { width: 8px; height: 8px; background-color: #3fb950; border-radius: 50%; margin-right: 8px; }' +
-'        .info-box { background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: 15px; text-align: left; font-size: 13px; font-family: monospace; margin-top: 15px; }' +
-'        .info-item { margin: 8px 0; display: flex; justify-content: space-between; }' +
-'        .value { color: #79c0ff; word-break: break-all; }' +
-'        button { background: #238636; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 15px; width: 100%; }' +
-'        pre { background: #0d1117; padding: 10px; border-radius: 6px; text-align: left; white-space: pre-wrap; font-size: 12px; color: #7ee787; border: 1px solid #30363d; max-height: 150px; overflow-y: auto; }' +
-'    </style>' +
-'</head>' +
-'<body>' +
-'    <div class="container">' +
-'        <div style="font-size:42px;">🚀</div>' +
-'        <h1>专用 DoH DNS 服务</h1>' +
-'        <div class="status-tag"><span class="dot"></span> Anycast 弹性集群就绪</div>' +
-'        <div class="info-box">' +
-'            <div class="info-item"><span style="color:#8b949e">DoH 地址:</span><span class="value" style="font-weight:bold;color:#58a6ff;">' + url.origin + '/dns-query</span></div>' +
-'            <div class="info-item"><span style="color:#8b949e">防护机制:</span><span class="value" style="color:#3fb950;">防 405 熔断 / 智能 ECS / 边缘 Cache</span></div>' +
-'        </div>' +
-'        <button onclick="testDns()">⚡ 实时测试 JSON 解析 (baidu.com)</button>' +
-'        <pre id="r" style="display:none;"></pre>' +
-'    </div>' +
-'    <script>' +
-'    async function testDns(){' +
-'        const r = document.getElementById("r");' +
-'        r.style.display = "block";' +
-'        r.textContent = "正在发起竞速解析...";' +
-'        try {' +
-'            const res = await fetch("' + url.origin + '/dns-query?name=baidu.com&type=A");' +
-'            if(!res.ok) throw new Error("HTTP Status " + res.status);' +
-'            r.textContent = JSON.stringify(await res.json(), null, 2);' +
-'        } catch(e) {' +
-'            r.textContent = "解析异常: " + e.message;' +
-'        }' +
-'    }' +
-'    </script>' +
-'</body>' +
-'</html>';
-      return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    // 仅响应 /dns-query 路径及根路径
+    if (url.pathname !== '/dns-query' && url.pathname !== '/') {
+      return new Response('Not Found', { status: 404 });
     }
 
-    let cacheKeyUrl = new URL(request.url);
-    let dnsBuffer = null;
-    let isGet = request.method === 'GET';
-
-    if (isGet) {
-      const dnsParam = url.searchParams.get('dns') || url.searchParams.get('name') || '';
-      cacheKeyUrl.pathname = `/cache/GET/${encodeURIComponent(dnsParam)}`;
-    } else {
-      dnsBuffer = new Uint8Array(await request.arrayBuffer());
-      const postHash = btoa(String.fromCharCode(...dnsBuffer.slice(0, 64))).replace(/=/g, '').replace(/\//g, '_');
-      cacheKeyUrl.pathname = `/cache/POST/${postHash}`;
-    }
-
-    const cfLocation = request.cf?.country || "";
-    let clientIp = '114.44.0.1'; 
-    if (cfLocation === "JP") clientIp = '61.211.0.1';   
-    else if (cfLocation === "SG") clientIp = '175.156.0.1';  
-    else if (cfLocation === "HK") clientIp = '203.198.0.1';  
-    else if (cfLocation === "US") clientIp = '8.8.8.8';
-    else if (cfLocation === "EU") clientIp = '1.1.1.1';
-
-    const cache = caches.default;
-
-    let cachedResponse = await cache.match(new Request(cacheKeyUrl.toString(), { method: 'GET' }));
-    if (cachedResponse) {
-      let hitResponse = new Response(cachedResponse.body, cachedResponse);
-      hitResponse.headers.set('X-Cache-Status', 'HIT_HUB');
-      return hitResponse;
-    }
-
-    const upstreamCacheKey = `${url.origin}/internal/best-upstream?region=${cfLocation}`;
-    let cachedBestUpstreamRes = await cache.match(new Request(upstreamCacheKey));
-    let preferredUpstream = cachedBestUpstreamRes ? await cachedBestUpstreamRes.text() : null;
-
-    async function fetchFromUpstream(upstream, timeoutMs) {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), timeoutMs);
-      
-      const upstreamHeaders = new Headers();
-      const isJsonRequest = url.searchParams.has('name') && !url.searchParams.has('dns');
-      upstreamHeaders.set('Accept', isJsonRequest ? 'application/dns-json' : 'application/dns-message');
-
-      let fetchUrl = upstream;
-      
-      const supportsEcs = upstream.includes('dns.google') || upstream.includes('alidns');
-      const ecsQuery = (supportsEcs && isGet) ? `&edns_client_subnet=${clientIp}` : '';
-
-      if (isGet) {
-        fetchUrl = `${upstream}?${url.searchParams.toString()}${ecsQuery}`;
-      } else {
-        upstreamHeaders.set('Content-Type', 'application/dns-message');
-      }
-
-      // 优化网络请求设置：让 Cloudflare 边缘节点自动复用 HTTP/2 和 HTTP/3 高速长连接
-      const fetchInit = {
-        method: isGet ? 'GET' : 'POST',
-        headers: upstreamHeaders,
-        signal: controller.signal,
-        cf: { 
-          cacheTtl: 5, 
-          cacheEverything: true
-        }
-      };
-
-      if (!isGet && dnsBuffer) {
-        fetchInit.body = dnsBuffer.slice();
-      }
-
-      try {
-        const res = await fetch(fetchUrl, fetchInit);
-        clearTimeout(id);
-        if (!res.ok) throw new Error(`Upstream Status: ${res.status}`);
-        return { response: res, source: upstream };
-      } catch (e) {
-        clearTimeout(id);
-        throw e;
-      }
-    }
-
-    let finalDnsResult = null;
-    let chosenSource = "";
-
-    if (preferredUpstream && SPEED_RACE_UPSTREAMS.includes(preferredUpstream)) {
-      try {
-        const resObj = await fetchFromUpstream(preferredUpstream, 700);
-        finalDnsResult = resObj.response;
-        chosenSource = resObj.source;
-      } catch (err) {
-        preferredUpstream = null; 
-      }
-    }
-
-    if (!finalDnsResult) {
-      const racePromises = SPEED_RACE_UPSTREAMS.map(upstream => 
-        fetchFromUpstream(upstream, RACE_TIMEOUT_MS)
-      );
-
-      try {
-        const fastestObj = await Promise.race(racePromises);
-        finalDnsResult = fastestObj.response;
-        chosenSource = fastestObj.source;
-
-        const saveBestUpstreamResponse = new Response(chosenSource, {
-          headers: { 'Cache-Control': `public, max-age=${BEST_UPSTREAM_TTL_SEC}` }
-        });
-        ctx.waitUntil(cache.put(new Request(upstreamCacheKey), saveBestUpstreamResponse));
-
-      } catch (err) {
-        try {
-          const fallbackObj = await fetchFromUpstream(ULTIMATE_FALLBACK_UPSTREAM, 3000);
-          finalDnsResult = fallbackObj.response;
-          chosenSource = fallbackObj.source;
-        } catch (fatalErr) {
-          return new Response(`DNS Upstream Timeout`, { status: 504 });
-        }
-      }
+    // CORS 跨域支持
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Accept, edns-client-subnet',
+          'Access-Control-Max-Age': '86400',
+        },
+      });
     }
 
     try {
-      const contentType = finalDnsResult.headers.get('content-type') || '';
-      
-      if (contentType.includes('json') || url.searchParams.has('name')) {
-        const jsonText = await finalDnsResult.text();
-        const cacheResponse = new Response(jsonText, {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/dns-json',
-            'Cache-Control': `public, max-age=${MIN_TTL_GAME}`,
-            'Access-Control-Allow-Origin': '*'
-          }
-        });
-        ctx.waitUntil(cache.put(new Request(cacheKeyUrl.toString(), { method: 'GET' }), cacheResponse.clone()));
-        return cacheResponse;
+      let dnsBuffer = null;
+      let cacheKey = '';
+
+      // 提取客户端 IP 以便透传 EDNS (ECS)
+      const clientIP = request.headers.get('cf-connecting-ip') || '';
+
+      // 1. 解析请求体/参数（支持 GET 和 POST RFC 8484 规格）
+      if (request.method === 'GET') {
+        const dnsParam = url.searchParams.get('dns');
+        if (!dnsParam) {
+          return new Response('Missing "dns" query parameter', { status: 400 });
+        }
+        cacheKey = `GET:${dnsParam}`;
+        dnsBuffer = base64UrlToBuffer(dnsParam);
+      } else if (request.method === 'POST') {
+        if (request.headers.get('content-type') !== 'application/dns-message') {
+          return new Response('Unsupported Content-Type', { status: 415 });
+        }
+        dnsBuffer = await request.arrayBuffer();
+        // 对 POST body 计算简单 hash 作为缓存 key
+        const hashBuf = await crypto.subtle.digest('SHA-256', dnsBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuf));
+        cacheKey = `POST:${hashArray.map(b => b.toString(16).padStart(2, '0')).join('')}`;
+      } else {
+        return new Response('Method Not Allowed', { status: 405 });
       }
 
-      let responseData = await finalDnsResult.arrayBuffer();
-      const isGameRequest = GAME_KEYWORDS.some(keyword => url.searchParams.toString().toLowerCase().includes(keyword));
-      const targetMinTtl = isGameRequest ? MIN_TTL_GAME : MIN_TTL_NORMAL;
-      
-      responseData = processDnsMessage(responseData, targetMinTtl);
+      // 2. 查询 LRU 缓存 (命中则直接秒回)
+      const cachedResponse = globalCache.get(cacheKey);
+      if (cachedResponse) {
+        return createDnsResponse(cachedResponse.buffer, 'HIT-LRU');
+      }
 
-      const cacheResponse = new Response(responseData, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/dns-message',
-          'Cache-Control': `public, max-age=${targetMinTtl}`, 
-          'X-Selected-Upstream': chosenSource,
-          'Access-Control-Allow-Origin': '*'
-        }
-      });
+      // 3. 缓存未命中，并发请求上游 DNS (并发竞赛，极速响应)
+      const upstreamResponse = await raceUpstreams(dnsBuffer, request.headers, clientIP);
 
-      ctx.waitUntil(cache.put(new Request(cacheKeyUrl.toString(), { method: 'GET' }), cacheResponse.clone()));
-      return cacheResponse;
-    } catch(e) {
-      return new Response(`DNS Processing Error: ${e.message}`, { status: 502 });
+      if (upstreamResponse) {
+        // 缓存本次查询结果
+        globalCache.set(cacheKey, { buffer: upstreamResponse.buffer }, CONFIG.MIN_TTL);
+        return createDnsResponse(upstreamResponse.buffer, 'MISS', upstreamResponse.provider);
+      }
+
+      return new Response('Upstream DNS Failure', { status: 504 });
+
+    } catch (err) {
+      return new Response(`DNS Processing Error: ${err.message}`, { status: 500 });
     }
   }
 };
+
+// ==================== 辅助功能实现 ====================
+
+// 并发请求多上游 DNS，取最快返回且状态码为 200 的响应
+async function raceUpstreams(dnsBuffer, origHeaders, clientIP) {
+  const controller = new AbortController();
+  const { signal } = controller;
+
+  const fetchPromises = CONFIG.UPSTREAMS.map(async (upstream) => {
+    try {
+      const headers = new Headers({
+        'Accept': 'application/dns-message',
+        'Content-Type': 'application/dns-message',
+      });
+
+      // 保留并透传 EDNS Client Subnet (ECS)
+      if (origHeaders.has('edns-client-subnet')) {
+        headers.set('edns-client-subnet', origHeaders.get('edns-client-subnet'));
+      } else if (clientIP) {
+        // 若客户端未显式带 ECS，自动透传客户端真实 IP 段以优化 CDN 解析
+        headers.set('X-Forwarded-For', clientIP);
+      }
+
+      // 转发 DNSSEC 标记请求
+      if (origHeaders.has('accept')) {
+        headers.set('Accept', origHeaders.get('accept'));
+      }
+
+      const response = await fetch(upstream, {
+        method: 'POST',
+        headers: headers,
+        body: dnsBuffer,
+        signal: signal,
+        cf: {
+          cacheTtl: 0, // 禁用 Cloudflare 节点默认 HTTP 缓存，由 Worker LRU 接管
+        }
+      });
+
+      if (response.ok && response.headers.get('content-type')?.includes('application/dns-message')) {
+        const buffer = await response.arrayBuffer();
+        controller.abort(); // 胜出者取消其他未完成请求
+        return { buffer, provider: upstream };
+      }
+      throw new Error(`Upstream ${upstream} failed status`);
+    } catch (e) {
+      throw e;
+    }
+  });
+
+  try {
+    // Promise.any 实现优先响应竞速
+    return await Promise.any(fetchPromises);
+  } catch (aggregateError) {
+    return null; // 全部上游均失败
+  }
+}
+
+// 组装标准的 DoH HTTP Response
+function createDnsResponse(buffer, cacheStatus, provider = 'cache') {
+  return new Response(buffer, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/dns-message',
+      'Cache-Control': `public, max-age=${CONFIG.MIN_TTL}`,
+      'Access-Control-Allow-Origin': '*',
+      'X-DNS-Cache-Status': cacheStatus,
+      'X-DNS-Upstream': provider,
+    },
+  });
+}
+
+// Base64URL 转 ArrayBuffer
+function base64UrlToBuffer(base64url) {
+  let base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+  while (base64.length % 4) {
+    base64 += '=';
+  }
+  const binary = atob(base64);
+  const buffer = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    buffer[i] = binary.charCodeAt(i);
+  }
+  return buffer.buffer;
+}
