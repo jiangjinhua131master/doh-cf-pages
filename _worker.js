@@ -25,11 +25,6 @@ const GAME_KEYWORDS = [
   'warthunder', 'gaijin', 'netgames', 'wargaming', 'wotblitz', 'tankcompany', 'battle', 'pjsekai', 'sega',
   'youtube', 'googlevideo', 'ytimg', 'netflix', 'nflxvideo', 'garena', 'lol', 'bilibili'
 ];
-
-const RACE_TIMEOUT_MS = 1800;
-const MIN_TTL_NORMAL = 3600; 
-const MIN_TTL_GAME = 60;     
-const BEST_UPSTREAM_TTL_SEC = 300; 
   // 3. 防限速与超时控制
   UPSTREAM_TIMEOUT: 2000,     // 单个上游超时时间 (2000ms)
 };
