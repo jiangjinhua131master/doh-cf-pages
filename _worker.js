@@ -7,7 +7,7 @@ const SPEED_RACE_UPSTREAMS = [
   'https://azure.cloudflare-dns.com/dns-query',         // 2. Cloudflare DNS (原生支持 H3)
   'https://doh.opendns.com/dns-query',   // 3. OpenDNS (Cisco)
   'https://dns.alidns.com/dns-query',    // 4. AliDNS 
-  'https://doh.pub/dns-query'.           // 5. DNSPod(Tencent)
+  'https://doh.pub/dns-query'           // 5. DNSPod(Tencent)
 ];
 
 const ULTIMATE_FALLBACK_UPSTREAM = 'https://dns.google/dns-query';
