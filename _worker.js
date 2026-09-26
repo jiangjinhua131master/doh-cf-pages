@@ -1,32 +1,37 @@
 /**
- * Ultimate DoH Resolver for Cloudflare Workers / Pages
- * Features: 
- *  1. Dual-layer Cache (L1 ARC Memory + L2 Cache API / CDN)
- *  2. Multi-Upstream Race & Rate-limit Mitigation (Anti-429/Failover)
- *  3. In-flight Request Deduplication (防刷爆上游)
- *  4. Full EDNS (ECS) & DNSSEC Pass-through
+ * Optimized DoH Resolver for Cloudflare Workers / Pages
+ * 
+ * Features:
+ * 1. Single-flight Request Deduplication (极大地减少重复请求)
+ * 2. Fastest Upstream Pinning (动态测试并锁定最快上游，避免每次全量竞速浪费请求额度)
+ * 3. Rate-Limit Mitigation & Failover (遇到 429/超时自动回退备用上游)
+ * 4. EDNS (ECS) & DNSSEC Pass-through
+ * 5. Two-Tier Caching (L1 ARC Memory + L2 Edge Cache API, 零 KV 依赖)
  */
 
-// ==================== 配置项 ====================
+// ==================== 1. 配置项 ====================
 const CONFIG = {
-  // 1. 上游 DoH 列表（包含了 Google、Cloudflare、DNSPod、AliDNS）
+  // 上游 DoH 列表
   UPSTREAMS: [
     'https://dns.google/dns-query',
     'https://azure.cloudflare-dns.com/dns-query',
-    'https://doh.pub/dns-query',      // 腾讯云 DNSPod
-    'https://dns.alidns.com/dns-query' // 阿里云 DNS
+    'https://doh.pub/dns-query',        // 腾讯云 DNSPod
+    'https://dns.alidns.com/dns-query'   // 阿里云 DNS
   ],
-  
-  // 2. 缓存参数
-  CACHE_MAX_ENTRIES: 1000,    // 一级 ARC 内存最大容量
-  MIN_TTL: 600,                // 强制最小 TTL (秒)，防止频繁刷请求
-  MAX_TTL: 86400,             // 最大 TTL (秒)
-  
-  // 3. 防限速与超时控制
-  UPSTREAM_TIMEOUT: 2000,     // 单个上游超时时间 (2000ms)
+
+  // 优选 DNS 刷新周期（单位：毫秒，默认 10 分钟测试并固定一次最快 DNS）
+  TEST_INTERVAL: 10 * 60 * 1000,
+
+  // 缓存参数
+  CACHE_MAX_ENTRIES: 1000,      // 一级 ARC 内存最大记录数
+  MIN_TTL: 600,                  // 强制最小 TTL (秒)，大幅减少穿透与 Worker 调用
+  MAX_TTL: 86400,               // 最大 TTL (秒)
+
+  // 超时控制 (毫秒)
+  UPSTREAM_TIMEOUT: 2000,
 };
 
-// ==================== ARC (Adaptive Replacement Cache) 算法 ====================
+// ==================== 2. ARC (Adaptive Replacement Cache) 内存缓存 ====================
 class ARCCache {
   constructor(capacity) {
     this.c = capacity;
@@ -137,11 +142,70 @@ class ARCCache {
   }
 }
 
-// 实例化 L1 全局内存缓存 & 单并发合并队列
+// 实例化内存对象
 const globalCache = new ARCCache(CONFIG.CACHE_MAX_ENTRIES);
 const inFlightRequests = new Map();
 
-// ==================== 主逻辑处理 ====================
+// ==================== 3. 动态优选 DNS 选路管理 ====================
+let sortedUpstreams = [...CONFIG.UPSTREAMS];
+let lastSpeedTestTime = 0;
+let isTesting = false;
+
+// 校验与并发测速，更新 sortedUpstreams 排序
+async function updateFastestUpstream(ctx) {
+  const now = Date.now();
+  if (now - lastSpeedTestTime < CONFIG.TEST_INTERVAL || isTesting) {
+    return;
+  }
+  isTesting = true;
+
+  const testTask = async () => {
+    // 构造测试包 (针对 root-a.dnspod.cn / A 记录测试)
+    const testDnsQuery = new Uint8Array([
+      0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x01, 0x61, 0x0c, 0x72, 0x6f, 0x6f, 0x74, 0x2d, 0x73, 0x65, 0x72, 0x76,
+      0x65, 0x72, 0x73, 0x03, 0x6e, 0x65, 0x74, 0x00, 0x00, 0x01, 0x00, 0x01
+    ]).buffer;
+
+    const results = await Promise.all(
+      CONFIG.UPSTREAMS.map(async (upstream) => {
+        const start = Date.now();
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 1500);
+
+        try {
+          const res = await fetch(upstream, {
+            method: 'POST',
+            headers: { 'Accept': 'application/dns-message', 'Content-Type': 'application/dns-message' },
+            body: testDnsQuery,
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+          if (res.ok) {
+            return { upstream, rtt: Date.now() - start };
+          }
+        } catch (e) {
+          clearTimeout(timer);
+        }
+        return { upstream, rtt: 9999 }; // 失败或超时记为高延迟
+      })
+    );
+
+    // 按 RTT 升序排列
+    results.sort((a, b) => a.rtt - b.rtt);
+    sortedUpstreams = results.map(r => r.upstream);
+    lastSpeedTestTime = Date.now();
+    isTesting = false;
+  };
+
+  if (ctx && ctx.waitUntil) {
+    ctx.waitUntil(testTask());
+  } else {
+    await testTask();
+  }
+}
+
+// ==================== 4. 主逻辑处理 ====================
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -150,6 +214,7 @@ export default {
       return new Response('Not Found', { status: 404 });
     }
 
+    // CORS 预检
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
@@ -162,6 +227,9 @@ export default {
     }
 
     try {
+      // 触发/检查异步更新 DNS 优选排序（不阻塞主请求处理）
+      updateFastestUpstream(ctx);
+
       let dnsBuffer = null;
       let cacheKey = '';
       const clientIP = request.headers.get('cf-connecting-ip') || '';
@@ -183,13 +251,13 @@ export default {
         return new Response('Method Not Allowed', { status: 405 });
       }
 
-      // ----------------- 【1. 第一层：L1 ARC 内存缓存】 -----------------
+      // --- 【阶段 1：L1 ARC 内存缓存】 ---
       const arcCached = globalCache.get(cacheKey);
       if (arcCached) {
         return createDnsResponse(arcCached.buffer, 'HIT-L1-ARC');
       }
 
-      // ----------------- 【2. 第二层：L2 Cache API (免费 CDN 级缓存)】 -----------------
+      // --- 【阶段 2：L2 Cloudflare Edge Cache API】 ---
       const cacheApi = caches.default;
       const cacheApiUrl = new URL(`https://dns-cache.local/${encodeURIComponent(cacheKey)}`);
       const cacheApiReq = new Request(cacheApiUrl.toString(), { method: 'GET' });
@@ -197,22 +265,20 @@ export default {
       let cfCachedRes = await cacheApi.match(cacheApiReq);
       if (cfCachedRes) {
         const buf = await cfCachedRes.arrayBuffer();
-        // 异步回填写 L1 ARC 内存
         globalCache.set(cacheKey, { buffer: buf }, CONFIG.MIN_TTL);
         return createDnsResponse(buf, 'HIT-L2-EDGE');
       }
 
-      // ----------------- 【3. 请求去重 (Deduplication / Single-flight)】 -----------------
-      // 如果相同的 DNS 请求正在向上游查询中，不重复触发，而是等待之前的那个请求返回直接拿结果
+      // --- 【阶段 3：请求去重合并 (Single-Flight Deduplication)】 ---
       if (inFlightRequests.has(cacheKey)) {
         const upstreamBuf = await inFlightRequests.get(cacheKey);
         if (upstreamBuf) return createDnsResponse(upstreamBuf.buffer, 'HIT-INFLIGHT-DEDUP');
       }
 
-      // ----------------- 【4. 向上游发起抗限速竞速查询】 -----------------
+      // --- 【阶段 4：按优选顺序请求 DNS（支持自动故障转移及限速回退）】 ---
       const fetchPromise = (async () => {
         try {
-          return await raceUpstreamsWithFallback(dnsBuffer, request.headers, clientIP);
+          return await fetchWithSequentialFallback(dnsBuffer, request.headers, clientIP);
         } finally {
           inFlightRequests.delete(cacheKey);
         }
@@ -222,17 +288,19 @@ export default {
       const upstreamResponse = await fetchPromise;
 
       if (upstreamResponse) {
-        // 1. 写入 L1 ARC 内存
+        // 1. 写入 L1 内存缓存
         globalCache.set(cacheKey, { buffer: upstreamResponse.buffer }, CONFIG.MIN_TTL);
 
-        // 2. 写入 L2 免费 Cache API
+        // 2. 写入 L2 边缘节点 Cache API
         const responseToCache = new Response(upstreamResponse.buffer, {
           headers: {
             'Content-Type': 'application/dns-message',
             'Cache-Control': `public, max-age=${CONFIG.MIN_TTL}`,
           },
         });
-        ctx.waitUntil(cacheApi.put(cacheApiReq, responseToCache));
+        if (ctx && ctx.waitUntil) {
+          ctx.waitUntil(cacheApi.put(cacheApiReq, responseToCache));
+        }
 
         return createDnsResponse(upstreamResponse.buffer, 'MISS', upstreamResponse.provider);
       }
@@ -245,10 +313,11 @@ export default {
   }
 };
 
-// ==================== 缓解限速与竞速核心逻辑 ====================
+// ==================== 5. 顺序回退请求逻辑（缓解 429 与限速） ====================
+async function fetchWithSequentialFallback(dnsBuffer, origHeaders, clientIP) {
+  const currentList = [...sortedUpstreams]; // 使用当前最快排序列表
 
-async function raceUpstreamsWithFallback(dnsBuffer, origHeaders, clientIP) {
-  const fetchPromises = CONFIG.UPSTREAMS.map(async (upstream) => {
+  for (const upstream of currentList) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CONFIG.UPSTREAM_TIMEOUT);
 
@@ -258,14 +327,14 @@ async function raceUpstreamsWithFallback(dnsBuffer, origHeaders, clientIP) {
         'Content-Type': 'application/dns-message',
       });
 
-      // 透传 EDNS Client Subnet (ECS)
+      // EDNS Client Subnet (ECS) 透传
       if (origHeaders.has('edns-client-subnet')) {
         headers.set('edns-client-subnet', origHeaders.get('edns-client-subnet'));
       } else if (clientIP) {
         headers.set('X-Forwarded-For', clientIP);
       }
 
-      // 透传 DNSSEC 请求参数
+      // DNSSEC 参数透传
       if (origHeaders.has('accept')) {
         headers.set('Accept', origHeaders.get('accept'));
       }
@@ -275,40 +344,31 @@ async function raceUpstreamsWithFallback(dnsBuffer, origHeaders, clientIP) {
         headers: headers,
         body: dnsBuffer,
         signal: controller.signal,
-        cf: { 
-          cacheTtl: 0,
-          // 尽量复用长连接
-          cacheEverything: false,
-        }
+        cf: { cacheTtl: 0 }
       });
 
       clearTimeout(timer);
 
-      // 缓解阿里/腾讯/Google 429 限速的关键：若遭遇 429/503，抛出异常交由 Promise.any 自动降级使用其他上游
-      if (response.status === 429 || response.status === 503) {
-        throw new Error(`Rate limited by ${upstream}`);
+      // 若遇 429 限速或 5xx 错误，立即尝试下一个上游
+      if (response.status === 429 || response.status >= 500) {
+        continue;
       }
 
       if (response.ok && response.headers.get('content-type')?.includes('application/dns-message')) {
         const buffer = await response.arrayBuffer();
         return { buffer, provider: upstream };
       }
-      throw new Error(`Upstream ${upstream} error code: ${response.status}`);
     } catch (e) {
       clearTimeout(timer);
-      throw e;
+      // 网络错误/超时，自动切换下一节点
+      continue;
     }
-  });
-
-  try {
-    // 竞速取最快返回且未被限速的成功结果
-    return await Promise.any(fetchPromises);
-  } catch (allErrors) {
-    return null; // 若全部上游被限速，返回 null 抛出 504
   }
+
+  return null; // 若全部上游异常则返回 null
 }
 
-// 组装 Response
+// 辅助工具：组装 Response
 function createDnsResponse(buffer, cacheStatus, provider = 'cache') {
   return new Response(buffer, {
     status: 200,
@@ -322,6 +382,7 @@ function createDnsResponse(buffer, cacheStatus, provider = 'cache') {
   });
 }
 
+// 辅助工具：Base64URL 转 ArrayBuffer
 function base64UrlToBuffer(base64url) {
   let base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
   while (base64.length % 4) {
