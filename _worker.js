@@ -18,13 +18,10 @@ const CONFIG = {
   ],
   
   // 2. 缓存参数
-  CACHE_MAX_ENTRIES: 1000,const ULTIMATE_FALLBACK_UPSTREAM = 'https://dns.google/dns-query';
-
-const GAME_KEYWORDS = [
-  'game', 'steam', 'epic', 'pubg', 'apex', 'riot', 'ea', 'sony', 'playstation', 'xbox', 'nintendo',
-  'warthunder', 'gaijin', 'netgames', 'wargaming', 'wotblitz', 'tankcompany', 'battle', 'pjsekai', 'sega',
-  'youtube', 'googlevideo', 'ytimg', 'netflix', 'nflxvideo', 'garena', 'lol', 'bilibili'
-];
+  CACHE_MAX_ENTRIES: 1000,    // 一级 ARC 内存最大容量
+  MIN_TTL: 600,                // 强制最小 TTL (秒)，防止频繁刷请求
+  MAX_TTL: 86400,             // 最大 TTL (秒)
+  
   // 3. 防限速与超时控制
   UPSTREAM_TIMEOUT: 2000,     // 单个上游超时时间 (2000ms)
 };
@@ -318,26 +315,6 @@ function createDnsResponse(buffer, cacheStatus, provider = 'cache') {
     headers: {
       'Content-Type': 'application/dns-message',
       'Cache-Control': `public, max-age=${CONFIG.MIN_TTL}`,
-      'Access-Control-Allow-Origin': '*',
-      'X-DNS-Cache-Status': cacheStatus,
-      'X-DNS-Upstream': provider,
-    },
-  });
-}
-
-function base64UrlToBuffer(base64url) {
-  let base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
-  while (base64.length % 4) {
-    base64 += '=';
-  }
-  const binary = atob(base64);
-  const buffer = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    buffer[i] = binary.charCodeAt(i);
-  }
-  return buffer.buffer;
-}
-, max-age=${CONFIG.MIN_TTL}`,
       'Access-Control-Allow-Origin': '*',
       'X-DNS-Cache-Status': cacheStatus,
       'X-DNS-Upstream': provider,
