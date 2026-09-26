@@ -13,8 +13,6 @@
 const CONFIG = {
   // 上游 DoH 列表
   UPSTREAMS: [
-    'https://dns.google/dns-query',
-    'https://azure.cloudflare-dns.com/dns-query',
     'https://doh.pub/dns-query',        // 腾讯云 DNSPod
     'https://dns.alidns.com/dns-query'   // 阿里云 DNS
   ],
