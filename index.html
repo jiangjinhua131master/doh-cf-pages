@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NextGen DNS Services | 高性能 DoH 解析终端</title>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent-color: #38bdf8;
+      --accent-hover: #0284c7;
+      --border-color: #334155;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 520px;
+      width: 100%;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+      text-align: center;
+    }
+    .logo {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      border-radius: 16px;
+      margin: 0 auto 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 15px -3px rgba(56, 189, 248, 0.3);
+    }
+    .logo svg { width: 36px; height: 36px; fill: none; stroke: #ffffff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    h1 { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+    p.subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      background-color: rgba(34, 197, 94, 0.1);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.2);
+      padding: 6px 16px;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 28px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background-color: #22c55e;
+      border-radius: 50%;
+      margin-right: 8px;
+      box-shadow: 0 0 8px #22c55e;
+    }
+    .info-box {
+      background-color: var(--bg-color);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-align: left;
+      line-height: 1.6;
+    }
+    .info-box code {
+      color: var(--accent-color);
+      font-family: monospace;
+      background: rgba(56, 189, 248, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    footer {
+      margin-top: 24px;
+      font-size: 12px;
+      color: var(--text-muted);
+      opacity: 0.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+    </div>
+    <h1>NextGen DNS Services</h1>
+    <p class="subtitle">面向低延迟、高隐私保护的智能 DNS Over HTTPS (DoH) 安全接入节点。</p>
+    
+    <div class="status-badge">
+      <span class="status-dot"></span>服务节点运行正常 (Operational)
+    </div>
+
+    <div class="info-box">
+      <strong>说明与配置指引：</strong><br>
+      • 本节点采用多路混合负载均衡技术，原生支持 EDNS Client Subnet (ECS)[span_3](start_span)[span_3](end_span)。<br>
+      • 终端设备接入需指定严格凭据与安全路径，未经授权的请求将被拒绝[span_4](start_span)[span_4](end_span)[span_5](start_span)[span_5](end_span)。<br>
+      • 协议规范：<code>RFC 8484 (DoH)</code> | 加密支持：<code>TLS 1.3 / HTTP/2</code>
+    </div>
+
+    <footer>&copy; 2026 NextGen Network Infrastructure. All rights reserved.</footer>
+  </div>
+</body>
+</html>
