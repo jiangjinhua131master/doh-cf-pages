@@ -12,8 +12,6 @@ const ECS_DEFAULT_PREFIX_V6 = 56;                                           // I
 // 2. 上游 DoH 服务器池（按需增减）
 const UPSTREAM_DNS = [
   'https://cloudflare-dns.com/dns-query',
-  'https://dns.alidns.com/dns-query',
-  'https://doh.pub/dns-query',
   'https://dns.google/dns-query'
 ];
 
